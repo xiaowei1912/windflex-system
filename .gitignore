@@ -1,0 +1,37 @@
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 配置文件（敏感信息）
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志和报告
+*.log
+logs/
+reports/
+
+# 临时文件和缓存
+temp/
+tmp/
+.cache/
+.pytest_cache/
+
+# Jenkins
+.jenkins/
+build/

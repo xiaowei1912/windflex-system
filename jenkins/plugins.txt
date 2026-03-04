@@ -1,0 +1,16 @@
+robot:latest
+git:latest
+github:latest
+gitlab-plugin:latest
+workflow-aggregator:latest
+pipeline-stage-view:latest
+blueocean:latest
+configuration-as-code:latest
+junit:latest
+htmlpublisher:latest
+credentials-binding:latest
+ssh-credentials:latest
+build-timeout:latest
+timestamper:latest
+ws-cleanup:latest
+ansicolor:latest

@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # --------------------------------------------------------------------------
+  # Hardware Control Service
+  # --------------------------------------------------------------------------
+  hardware-service:
+    build:
+      context: ./services/hardware-service
+      dockerfile: Dockerfile
+    image: windflex/hardware-service:latest
+    container_name: windflex-hardware-service
+    ports:
+      - "${HARDWARE_SERVICE_PORT:-8000}:8000"
+    volumes:
+      - /var/run/usb:/var/run/usb
+      - ${SSH_KEY_DIR:-/root/.ssh}:/root/.ssh:ro
+    devices:
+      - ${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
+      - /dev/bus/usb:/dev/bus/usb
+    privileged: true
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - BOARD_IP=${BOARD_IP}
+      - BOARD_SSH_PORT=${BOARD_SSH_PORT:-22}
+      - BOARD_SSH_USER=${BOARD_SSH_USER:-root}
+      - BOARD_SSH_KEY_PATH=${BOARD_SSH_KEY_PATH:-/root/.ssh/id_rsa}
+      - BOARD_SSH_PASSWORD=${BOARD_SSH_PASSWORD:-}
+      - POWER_MODEL=${POWER_MODEL:-Non-programmable}
+      - SERIAL_DEVICE=${SERIAL_DEVICE:-/dev/ttyUSB0}
+      - BAUD_RATE=${BAUD_RATE:-9600}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - windflex-net
+
+  # --------------------------------------------------------------------------
+  # Jenkins
+  # --------------------------------------------------------------------------
+  jenkins:
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    image: windflex/jenkins:latest
+    container_name: windflex-jenkins
+    ports:
+      - "${JENKINS_HTTP_PORT:-8080}:8080"
+      - "${JENKINS_JNLP_PORT:-50000}:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - JAVA_OPTS=-Duser.timezone=${TZ:-Asia/Shanghai} -Djenkins.install.runSetupWizard=false
+      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc_configs
+      - BOARD_IP=${BOARD_IP}
+      - HARDWARE_SERVICE_URL=http://hardware-service:8000
+      - GIT_PLATFORM=${GIT_PLATFORM:-github}
+      - GIT_URL=${GIT_URL}
+      - GIT_USER=${GIT_USER}
+      - GIT_TOKEN=${GIT_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      hardware-service:
+        condition: service_healthy
+    networks:
+      - windflex-net
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:14-alpine
+    container_name: windflex-postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - POSTGRES_DB=windflex
+      - POSTGRES_USER=windflex
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-windflex_db_password}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U windflex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - windflex-net
+
+  # --------------------------------------------------------------------------
+  # Redis
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: windflex-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - windflex-net
+
+# --------------------------------------------------------------------------
+# Volumes & Networks
+# --------------------------------------------------------------------------
+volumes:
+  jenkins_home:
+  pgdata:
+  redis_data:
+
+networks:
+  windflex-net:
+    driver: bridge

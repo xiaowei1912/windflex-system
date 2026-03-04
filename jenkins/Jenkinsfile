@@ -1,0 +1,172 @@
+/**
+ * Windflex Phase 1 - Robot Framework Test Pipeline
+ *
+ * This pipeline:
+ * 1. Checks out the test-cases repository
+ * 2. Detects power model and filters test tags accordingly
+ * 3. Runs Robot Framework tests
+ * 4. Publishes HTML and JUnit reports
+ */
+
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    parameters {
+        string(
+            name: 'TEST_TAGS',
+            defaultValue: '',
+            description: 'Robot Framework tag filter (leave empty for auto-detect based on POWER_MODEL)'
+        )
+        string(
+            name: 'TEST_SUITE',
+            defaultValue: 'test-suites/',
+            description: 'Path to test suite directory or .robot file relative to repo root'
+        )
+        string(
+            name: 'GIT_BRANCH',
+            defaultValue: 'main',
+            description: 'Test cases branch to check out'
+        )
+    }
+
+    environment {
+        BOARD_IP          = "${env.BOARD_IP ?: '192.168.1.100'}"
+        HARDWARE_SERVICE  = "${env.HARDWARE_SERVICE_URL ?: 'http://hardware-service:8000'}"
+        POWER_MODEL       = "${env.POWER_MODEL ?: 'Non-programmable'}"
+        RF_OUTPUT_DIR     = "robot-results"
+        GIT_CREDENTIALS   = credentials('git-credentials')
+    }
+
+    stages {
+        stage('Checkout Test Cases') {
+            steps {
+                script {
+                    def gitUrl = env.GIT_URL ?: 'https://github.com/xiaowei1912/board-test-cases.git'
+                    echo "Checking out test cases from: ${gitUrl} (branch: ${params.GIT_BRANCH})"
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${params.GIT_BRANCH}"]],
+                        userRemoteConfigs: [[
+                            url: gitUrl,
+                            credentialsId: 'git-credentials'
+                        ]]
+                    ])
+                }
+            }
+        }
+
+        stage('Detect Power Capability') {
+            steps {
+                script {
+                    def response = sh(
+                        script: "curl -sf ${env.HARDWARE_SERVICE}/api/v1/power/capability || echo '{\"programmable\":false}'",
+                        returnStdout: true
+                    ).trim()
+                    echo "Power capability: ${response}"
+
+                    // Determine which tags to include/exclude
+                    if (env.POWER_MODEL == 'DLX-30V10AMP') {
+                        env.RF_INCLUDE_TAG  = ''       // run everything
+                        env.RF_EXCLUDE_TAG  = ''
+                        echo "Programmable power: running ALL test cases"
+                    } else {
+                        env.RF_INCLUDE_TAG  = ''
+                        env.RF_EXCLUDE_TAG  = 'requires_power_control'
+                        echo "Non-programmable power: skipping 'requires_power_control' tests"
+                    }
+                }
+            }
+        }
+
+        stage('Run Robot Framework Tests') {
+            steps {
+                script {
+                    def tagArgs = ''
+                    if (params.TEST_TAGS) {
+                        tagArgs += "--include ${params.TEST_TAGS} "
+                    }
+                    if (env.RF_EXCLUDE_TAG) {
+                        tagArgs += "--exclude ${env.RF_EXCLUDE_TAG} "
+                    }
+
+                    sh """
+                        mkdir -p ${env.RF_OUTPUT_DIR}
+                        robot \\
+                            ${tagArgs}\\
+                            --outputdir ${env.RF_OUTPUT_DIR} \\
+                            --output output.xml \\
+                            --log log.html \\
+                            --report report.html \\
+                            --variable BOARD_IP:${env.BOARD_IP} \\
+                            --variable HARDWARE_SERVICE:${env.HARDWARE_SERVICE} \\
+                            --variable POWER_MODEL:${env.POWER_MODEL} \\
+                            --timestampoutputs \\
+                            ${params.TEST_SUITE} || true
+                    """
+                }
+            }
+        }
+
+        stage('Publish Results') {
+            steps {
+                // JUnit-compatible output
+                junit(
+                    testResults: "${env.RF_OUTPUT_DIR}/output.xml",
+                    allowEmptyResults: true
+                )
+                // Robot Framework HTML report
+                publishHTML([
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: env.RF_OUTPUT_DIR,
+                    reportFiles: 'report.html',
+                    reportName: 'Robot Framework Report',
+                    reportTitles: 'Test Report'
+                ])
+                // Robot plugin (if installed)
+                script {
+                    try {
+                        robot(
+                            outputPath: env.RF_OUTPUT_DIR,
+                            outputFileName: 'output.xml',
+                            reportFileName: 'report.html',
+                            logFileName: 'log.html',
+                            passThreshold: 80.0,
+                            unstableThreshold: 70.0,
+                            disableArchiveOutput: false
+                        )
+                    } catch (Exception e) {
+                        echo "Robot plugin not available, skipping: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished. Power model: ${env.POWER_MODEL}"
+            archiveArtifacts(
+                artifacts: "${env.RF_OUTPUT_DIR}/**",
+                allowEmptyArchive: true
+            )
+        }
+        success {
+            echo "All tests passed!"
+        }
+        failure {
+            echo "Tests failed. Check the Robot Framework report for details."
+        }
+        unstable {
+            echo "Some tests failed. Review the report."
+        }
+    }
+}

@@ -1,0 +1,56 @@
+jenkins:
+  systemMessage: "Windflex Automation Testing System - Phase 1 Prototype"
+  numExecutors: 2
+  slaveAgentPort: 50000
+  remotingSecurity:
+    enabled: true
+
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${JENKINS_ADMIN_PASSWORD:-windflex_admin}"
+          name: "Administrator"
+          properties:
+            - "apiToken"
+
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "BOARD_IP"
+            value: "${BOARD_IP:-192.168.1.100}"
+          - key: "HARDWARE_SERVICE_URL"
+            value: "${HARDWARE_SERVICE_URL:-http://hardware-service:8000}"
+          - key: "POWER_MODEL"
+            value: "${POWER_MODEL:-Non-programmable}"
+          - key: "GIT_PLATFORM"
+            value: "${GIT_PLATFORM:-github}"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "git-credentials"
+              username: "${GIT_USER:-}"
+              password: "${GIT_TOKEN:-}"
+              description: "Git platform credentials"
+
+unclassified:
+  location:
+    url: "http://localhost:${JENKINS_HTTP_PORT:-8080}/"
+    adminAddress: "admin@windflex.local"
+  timestamper:
+    allPipelines: true
+
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
