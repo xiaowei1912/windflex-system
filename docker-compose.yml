@@ -47,7 +47,7 @@ services:
     build:
       context: ./jenkins
       dockerfile: Dockerfile
-    image: windflex/jenkins:latest
+    image: windflex/jenkins:2.479.3-lts-jdk17
     container_name: windflex-jenkins
     ports:
       - "${JENKINS_HTTP_PORT:-8080}:8080"
